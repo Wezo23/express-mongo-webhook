@@ -10,7 +10,7 @@ app.post('/webhook', async (req, res) => {
   let messages = [];
 
   try {
-    messages = [ JSON.parse(raw) ]; // Try single JSON
+    messages = [ JSON.parse(raw) ];
   } catch {
     const parts = raw.replace(/}\s*{/g, '}\n{').split('\n');
     try {
@@ -21,23 +21,16 @@ app.post('/webhook', async (req, res) => {
     }
   }
 
-  // 🔴 Filter out "login" messages
-  const filteredMessages = messages.filter(m => m.msg !== "login");
-
-  if (filteredMessages.length === 0) {
-    return res.sendStatus(200); // All skipped — just respond 200 OK silently
-  }
-
   const db = getDb();
   const col = db.collection(process.env.COLLECTION_NAME);
 
   try {
-    await col.insertMany(filteredMessages.map(m => ({
+    await col.insertMany(messages.map(m => ({
       data: m,
       receivedAt: new Date()
     })));
 
-    res.sendStatus(200); // ✅ Successful insert, respond with 200 OK silently
+    res.sendStatus(200); // 🔄 Changed from res.status(201)... to silent success
   } catch (err) {
     console.error('🚨 Mongo insert error:', err.message);
     res.status(500).json({ success: false, error: 'Database error' });
