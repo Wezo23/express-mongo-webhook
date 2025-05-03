@@ -4,32 +4,54 @@ const express = require('express');
 const { connectToMongoDB, getDb } = require('./db/mongoClient');
 
 const app = express();
-app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
+// Use raw body parser instead of JSON
+app.use(express.raw({ type: '*/*', limit: '2mb' }));
 
 app.post('/webhook', async (req, res) => {
+  const raw = req.body.toString('utf8').trim();
+
+  let messages = [];
+
+  try {
+    // Try simple JSON parse first
+    messages = [ JSON.parse(raw) ];
+  } catch {
+    // Split glued JSON objects
+    const parts = raw.replace(/}\s*{/g, '}\n{').split('\n');
+    try {
+      messages = parts.map(part => JSON.parse(part));
+    } catch (err) {
+      console.error('🚨 JSON parsing failed:', parts, err.message);
+      return res.status(400).json({ success: false, error: 'Invalid JSON format' });
+    }
+  }
+
   try {
     const db = getDb();
-    const collection = db.collection(process.env.COLLECTION_NAME);
+    const col = db.collection(process.env.COLLECTION_NAME);
 
-    const document = {
-      data: req.body,
-      receivedAt: new Date(),
-    };
+    // Insert all parsed messages
+    const result = await col.insertMany(messages.map(msg => ({
+      data: msg,
+      receivedAt: new Date()
+    })));
 
-    const result = await collection.insertOne(document);
-    res.status(201).json({ success: true, id: result.insertedId });
-  } catch (error) {
-    console.error('Error saving webhook:', error);
-    res.status(500).json({ success: false, error: 'Internal Server Error' });
+    res.status(201).json({
+      success: true,
+      insertedCount: result.insertedCount
+    });
+  } catch (err) {
+    console.error('🚨 DB Insert error:', err.message);
+    res.status(500).json({ success: false, error: 'Database error' });
   }
 });
 
+// Start server
 connectToMongoDB().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+  app.listen(process.env.PORT || 3000, () => {
+    console.log(`🚀 Server running on port ${process.env.PORT || 3000}`);
   });
 }).catch(err => {
-  console.error('Failed to start server:', err);
+  console.error('MongoDB init failed:', err.message);
 });
